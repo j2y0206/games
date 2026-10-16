@@ -1,0 +1,11 @@
+data/*.db
+data/*.db-shm
+data/*.db-wal
+__pycache__/
+.tools/
+games/lumi-starlight-godot/.godot/
+games/lumi-starlight-godot/builds/
+.artifacts/
+.DS_Store
+Thumbs.db
+*.log

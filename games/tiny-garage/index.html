@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#75c8d3">
+  <title>꼬마 자동차 정비소</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main id="garage" class="garage" aria-label="꼬마 자동차 정비소">
+    <div class="wall" aria-hidden="true">
+      <div class="window"><span></span><span></span><span></span></div>
+      <div class="garage-sign">
+        <span class="sign-wheel"></span>
+        <span class="sign-wrench"></span>
+      </div>
+      <div class="shelf shelf-left"><i></i><i></i><i></i></div>
+      <div class="shelf shelf-right"><i></i><i></i></div>
+    </div>
+
+    <button id="soundButton" class="sound-button" type="button" aria-label="소리 켜기 또는 끄기" aria-pressed="false">
+      <span class="speaker" aria-hidden="true"></span>
+    </button>
+
+    <section id="playArea" class="play-area" aria-label="세차 공간">
+      <div class="wash-arch" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div class="floor-shadow" aria-hidden="true"></div>
+
+      <div id="car" class="car car--blue" aria-label="진흙이 묻은 자동차">
+        <svg id="carSvg" viewBox="0 0 900 470" role="img" aria-label="닦을 수 있는 자동차">
+          <g class="car-art">
+            <ellipse class="car-shadow" cx="450" cy="410" rx="340" ry="34"/>
+            <path class="rear-bumper" d="M122 320H78c-18 0-30-10-30-26s12-27 30-27h60z"/>
+            <path class="front-bumper" d="M778 320h44c18 0 30-10 30-26s-12-27-30-27h-60z"/>
+            <path class="car-body" d="M100 338c-13-82 2-152 63-188 54-32 145-45 287-45s233 13 287 45c61 36 76 106 63 188-6 38-37 65-75 65H175c-38 0-69-27-75-65z"/>
+            <path class="car-top" d="M260 162c42-78 94-112 190-112s148 34 190 112z"/>
+            <path class="window window-left" d="M293 151c34-56 74-80 136-84v84z"/>
+            <path class="window window-right" d="M469 67c62 4 102 28 136 84H469z"/>
+            <path class="body-highlight" d="M164 202c86-38 470-43 576 6 11 5 17 17 13 28-4 12-16 18-28 14-142-46-402-41-543 1-13 4-26-3-29-16-3-13 2-27 11-33z"/>
+            <path class="grille" d="M330 309c72 18 168 18 240 0l-13 50c-4 15-17 25-32 28-50 10-100 10-150 0-15-3-28-13-32-28z"/>
+            <path class="grille-line" d="M365 337h170"/>
+            <path class="grille-line" d="M376 359h148"/>
+            <g class="headlight headlight-left"><path d="M137 257c37-18 83-24 135-17l-13 64c-45 2-83-6-115-27z"/><circle cx="211" cy="268" r="16"/></g>
+            <g class="headlight headlight-right"><path d="M763 257c-37-18-83-24-135-17l13 64c45 2 83-6 115-27z"/><circle cx="689" cy="268" r="16"/></g>
+            <path class="smile" d="M409 383q41 25 82 0"/>
+            <g class="wheel wheel-left" transform="translate(197 384)"><circle r="61"/><circle class="hub" r="29"/><circle class="hub-dot" r="8"/></g>
+            <g class="wheel wheel-right" transform="translate(703 384)"><circle r="61"/><circle class="hub" r="29"/><circle class="hub-dot" r="8"/></g>
+          </g>
+
+          <g class="mud" data-x="245" data-y="218" transform="translate(245 218)" style="--clean:0">
+            <path d="M-67 12c-17-36 9-73 47-65 22-31 76-13 72 25 37 10 32 59 3 69-31 17-104 12-122-29z"/>
+            <circle cx="-74" cy="-33" r="13"/><circle cx="63" cy="45" r="10"/><circle cx="42" cy="-60" r="8"/>
+          </g>
+          <g class="mud" data-x="535" data-y="186" transform="translate(535 186)" style="--clean:0">
+            <path d="M-50-8c7-34 43-49 72-30 34-12 63 26 44 55 18 31-18 65-51 47-27 20-79-4-65-72z"/>
+            <circle cx="-60" cy="43" r="10"/><circle cx="76" cy="-22" r="12"/>
+          </g>
+          <g class="mud" data-x="675" data-y="324" transform="translate(675 324)" style="--clean:0">
+            <path d="M-62 2c-4-31 33-58 61-42 26-20 72 4 63 38 28 28 3 66-34 60-33 19-88-12-90-56z"/>
+            <circle cx="-74" cy="43" r="11"/><circle cx="75" cy="25" r="8"/>
+          </g>
+          <g class="mud" data-x="403" data-y="278" transform="translate(403 278)" style="--clean:0">
+            <path d="M-52 4c-9-30 24-60 54-47 27-22 69 3 59 37 22 28-4 65-39 53-31 22-66-8-74-43z"/>
+            <circle cx="-58" cy="-34" r="9"/><circle cx="69" cy="24" r="11"/>
+          </g>
+          <g class="mud" data-x="175" data-y="340" transform="translate(175 340)" style="--clean:0">
+            <path d="M-54-9c8-31 44-47 70-29 31-9 57 27 38 54 12 34-29 57-56 35-31 15-70-23-52-60z"/>
+          </g>
+        </svg>
+        <div class="car-face" aria-hidden="true"><i></i><i></i></div>
+      </div>
+
+      <div id="celebration" class="celebration" aria-hidden="true">
+        <i></i><i></i><i></i><i></i><i></i>
+      </div>
+
+      <button id="hose" class="tool tool--hose is-helping" type="button" data-tool="hose" aria-label="물 호스를 잡아서 자동차를 씻기">
+        <span class="tool-halo"></span>
+        <span class="hose-body"><i></i></span>
+        <span class="water-spray"></span>
+      </button>
+
+      <button id="sponge" class="tool tool--sponge is-helping" type="button" data-tool="sponge" aria-label="스펀지를 잡아서 자동차를 닦기">
+        <span class="tool-halo"></span>
+        <span class="sponge-body"><i></i><i></i><i></i></span>
+      </button>
+
+      <div id="bubbleLayer" class="bubble-layer" aria-hidden="true"></div>
+    </section>
+
+    <div class="rotate-hint" aria-hidden="true">
+      <span class="tablet-icon"></span>
+      <strong>가로로 돌려주세요</strong>
+    </div>
+  </main>
+  <script src="game.js"></script>
+</body>
+</html>
