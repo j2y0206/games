@@ -1,0 +1,19 @@
+{
+  "name": "별빛마을 모험대",
+  "short_name": "별빛마을",
+  "description": "아이패드로 탐험하는 포근한 마을 모험 게임",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#76cfc1",
+  "theme_color": "#76cfc1",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
