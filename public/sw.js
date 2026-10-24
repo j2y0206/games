@@ -1,4 +1,4 @@
-const CACHE_NAME = "pizza-village-25d-v2";
+const CACHE_NAME = "pizza-village-25d-v3";
 
 self.addEventListener("install", () => self.skipWaiting());
 

@@ -38,6 +38,13 @@ let doorTargetRotation = 0;
 let nearDoor = false;
 let lastTime = performance.now();
 let walkClock = 0;
+let actionUiState = "";
+let objectiveUiState = "";
+
+const LOW_POWER_DEVICE =
+  window.matchMedia("(pointer: coarse)").matches ||
+  navigator.maxTouchPoints > 1 ||
+  (navigator.deviceMemory && navigator.deviceMemory <= 4);
 
 function ensureAudio() {
   if (muted) return;
@@ -81,9 +88,18 @@ function showToast(message, duration = 1500) {
 }
 
 function setAction(label, ready) {
+  const nextState = `${label}|${ready}`;
+  if (actionUiState === nextState) return;
+  actionUiState = nextState;
   ui.actionLabel.textContent = label;
   ui.actionButton.setAttribute("aria-label", label);
   ui.actionButton.classList.toggle("is-ready", ready);
+}
+
+function setObjectiveText(text) {
+  if (objectiveUiState === text) return;
+  objectiveUiState = text;
+  ui.objectiveText.textContent = text;
 }
 
 function setupJoystick() {
@@ -136,11 +152,13 @@ const camera = new THREE.OrthographicCamera(-10, 10, 6, -6, 0.1, 80);
 const cameraFocus = new THREE.Vector3(0.7, 0.8, 1.2);
 const cameraOffset = new THREE.Vector3(11.5, 13.5, 16.5);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+const renderer = new THREE.WebGLRenderer({ antialias: !LOW_POWER_DEVICE, powerPreference: "high-performance" });
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.shadowMap.enabled = true;
+renderer.shadowMap.enabled = !LOW_POWER_DEVICE;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+renderer.shadowMap.autoUpdate = false;
+renderer.shadowMap.needsUpdate = !LOW_POWER_DEVICE;
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, LOW_POWER_DEVICE ? 1 : 1.35));
 ui.gameRoot.appendChild(renderer.domElement);
 
 const hemi = new THREE.HemisphereLight(0xfff8df, 0x668868, 2.35);
@@ -148,7 +166,7 @@ scene.add(hemi);
 
 const sun = new THREE.DirectionalLight(0xfff3d2, 3.2);
 sun.position.set(-10, 18, 12);
-sun.castShadow = true;
+sun.castShadow = !LOW_POWER_DEVICE;
 sun.shadow.mapSize.set(1024, 1024);
 sun.shadow.camera.left = -18;
 sun.shadow.camera.right = 18;
@@ -178,13 +196,17 @@ const COLORS = {
   ink: 0x3b3a32
 };
 
+const plainMaterialCache = new Map();
+
 function toon(color, options = {}) {
-  return new THREE.MeshToonMaterial({ color, ...options });
+  if (Object.keys(options).length > 0) return new THREE.MeshToonMaterial({ color, ...options });
+  if (!plainMaterialCache.has(color)) plainMaterialCache.set(color, new THREE.MeshToonMaterial({ color }));
+  return plainMaterialCache.get(color);
 }
 
 function shadowed(mesh, receive = true) {
-  mesh.castShadow = true;
-  mesh.receiveShadow = receive;
+  mesh.castShadow = !LOW_POWER_DEVICE;
+  mesh.receiveShadow = !LOW_POWER_DEVICE && receive;
   return mesh;
 }
 
@@ -202,14 +224,32 @@ scene.add(world);
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(32, 24), toon(COLORS.grass));
 ground.rotation.x = -Math.PI / 2;
 ground.position.y = -0.09;
-ground.receiveShadow = true;
+ground.receiveShadow = !LOW_POWER_DEVICE;
 world.add(ground);
+
+const blobShadowMaterial = new THREE.MeshBasicMaterial({
+  color: 0x284b3d,
+  transparent: true,
+  opacity: LOW_POWER_DEVICE ? 0.16 : 0.08,
+  depthWrite: false
+});
+
+function addBlobShadow(x, z, width, depth, rotation = -0.45) {
+  const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.5, 20), blobShadowMaterial);
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.rotation.z = rotation;
+  shadow.scale.set(width, depth, 1);
+  shadow.position.set(x, 0.012, z);
+  shadow.renderOrder = 1;
+  world.add(shadow);
+  return shadow;
+}
 
 function addGroundDisc(x, z, radius, color, y = -0.035) {
   const disc = new THREE.Mesh(new THREE.CircleGeometry(radius, 40), toon(color));
   disc.rotation.x = -Math.PI / 2;
   disc.position.set(x, y, z);
-  disc.receiveShadow = true;
+  disc.receiveShadow = !LOW_POWER_DEVICE;
   world.add(disc);
   return disc;
 }
@@ -218,7 +258,7 @@ function addPathStrip(x, z, width, depth, rotation = 0) {
   const strip = new THREE.Mesh(new THREE.BoxGeometry(width, 0.09, depth), toon(COLORS.path));
   strip.position.set(x, -0.025, z);
   strip.rotation.y = rotation;
-  strip.receiveShadow = true;
+  strip.receiveShadow = !LOW_POWER_DEVICE;
   world.add(strip);
   return strip;
 }
@@ -232,6 +272,7 @@ addGroundDisc(5.2, -3.0, 2.25, COLORS.path, -0.015);
 const colliders = [];
 
 function addTree(x, z, scale = 1, leafColor = COLORS.leaf) {
+  addBlobShadow(x + 0.62 * scale, z + 0.52 * scale, 2.6 * scale, 1.15 * scale);
   const group = new THREE.Group();
   group.position.set(x, 0, z);
   const trunk = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(0.24 * scale, 0.34 * scale, 2.2 * scale, 7), toon(COLORS.wood)));
@@ -256,6 +297,7 @@ function addTree(x, z, scale = 1, leafColor = COLORS.leaf) {
 }
 
 function addRock(x, z, scale = 1) {
+  addBlobShadow(x + 0.25 * scale, z + 0.2 * scale, 1.15 * scale, 0.48 * scale);
   const rock = shadowed(new THREE.Mesh(new THREE.DodecahedronGeometry(0.55 * scale, 0), toon(0xa8a28b)));
   rock.scale.set(1.25, 0.7, 1);
   rock.position.set(x, 0.35 * scale, z);
@@ -308,6 +350,7 @@ function createPond() {
 }
 
 function createPizzaShop() {
+  addBlobShadow(7.4, -3.9, 7.4, 3.1, -0.3);
   const shop = new THREE.Group();
   shop.position.set(5.5, 0, -5.25);
   world.add(shop);
@@ -325,7 +368,7 @@ function createPizzaShop() {
   }
 
   const chimney = addBox(shop, [0.7, 2.0, 0.7], [1.9, 4.6, -0.65], shadeMat);
-  chimney.castShadow = true;
+  chimney.castShadow = !LOW_POWER_DEVICE;
   addBox(shop, [0.9, 0.24, 0.9], [1.9, 5.55, -0.65], roofMat);
 
   const frontZ = 2.23;
@@ -343,7 +386,7 @@ function createPizzaShop() {
   for (let index = 0; index < 9; index += 1) {
     const color = index % 2 === 0 ? COLORS.red : COLORS.cream;
     const stripe = addBox(awning, [0.48, 0.24, 0.82], [(index - 4) * 0.47, 0, 0], toon(color), [-0.16, 0, 0]);
-    stripe.castShadow = true;
+    stripe.castShadow = !LOW_POWER_DEVICE;
   }
 
   const sign = new THREE.Mesh(new THREE.CircleGeometry(0.65, 24), toon(COLORS.cream));
@@ -609,7 +652,7 @@ function updateHero(delta, elapsed) {
 
   nearDoor = hero.position.distanceTo(DOOR_POSITION) < 2.55;
   setAction(nearDoor ? (doorOpen ? "문 닫기" : "문 열기") : "인사하기", nearDoor);
-  ui.objectiveText.textContent = doorOpen ? "따뜻한 피자 향기가 나요" : nearDoor ? "오른쪽 버튼으로 문을 열어요" : "피자가게 문까지 걸어가요";
+  setObjectiveText(doorOpen ? "따뜻한 피자 향기가 나요" : nearDoor ? "오른쪽 버튼으로 문을 열어요" : "피자가게 문까지 걸어가요");
 }
 
 function doAction() {
@@ -640,9 +683,11 @@ function updateWorld(delta, elapsed) {
   heroSprite.scale.y += (2.35 - heroSprite.scale.y) * Math.min(1, delta * 8);
 }
 
+const desiredCameraFocus = new THREE.Vector3();
+
 function updateCamera(delta) {
-  const desired = new THREE.Vector3(hero.position.x * 0.72 + 0.7, 0.8, hero.position.z * 0.62 - 0.45);
-  cameraFocus.lerp(desired, Math.min(1, delta * 3.2));
+  desiredCameraFocus.set(hero.position.x * 0.72 + 0.7, 0.8, hero.position.z * 0.62 - 0.45);
+  cameraFocus.lerp(desiredCameraFocus, Math.min(1, delta * 3.2));
   camera.position.copy(cameraFocus).add(cameraOffset);
   camera.lookAt(cameraFocus);
 }
@@ -670,7 +715,7 @@ function resetGame() {
   ui.joystickStick.style.transform = "translate(0, 0)";
   cameraFocus.set(0.7, 0.8, 1.2);
   setAction("인사하기", false);
-  ui.objectiveText.textContent = "피자가게 문까지 걸어가요";
+  setObjectiveText("피자가게 문까지 걸어가요");
 }
 
 function startGame() {
@@ -691,6 +736,10 @@ function animate(now) {
   const elapsed = now / 1000;
   lastTime = now;
   updateHero(delta, elapsed);
+  if (controls.actionQueued) {
+    controls.actionQueued = false;
+    doAction();
+  }
   updateWorld(delta, elapsed);
   updateCamera(delta);
   renderer.render(scene, camera);
@@ -728,13 +777,6 @@ setupJoystick();
 resize();
 resetGame();
 window.requestAnimationFrame(animate);
-
-window.setInterval(() => {
-  if (controls.actionQueued) {
-    controls.actionQueued = false;
-    doAction();
-  }
-}, 40);
 
 if (import.meta.env.PROD && "serviceWorker" in navigator && window.isSecureContext) {
   window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {}));
