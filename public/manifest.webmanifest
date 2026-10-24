@@ -1,13 +1,13 @@
 {
-  "name": "별빛마을 모험대",
-  "short_name": "별빛마을",
-  "description": "아이패드로 탐험하는 포근한 마을 모험 게임",
+  "name": "피자마을 산책",
+  "short_name": "피자마을",
+  "description": "2D 도트 캐릭터와 3D 마을이 만나는 아이패드용 산책 게임",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "landscape",
-  "background_color": "#76cfc1",
-  "theme_color": "#76cfc1",
+  "background_color": "#173f42",
+  "theme_color": "#173f42",
   "icons": [
     {
       "src": "./icon.svg",

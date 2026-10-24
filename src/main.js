@@ -1,48 +1,22 @@
-import Phaser from "phaser";
+import * as THREE from "three";
 import "./style.css";
 
-const GAME_WIDTH = 1280;
-const GAME_HEIGHT = 720;
-const STORAGE_PREFIX = "starlight-village:";
-
-const CHARACTER_PALETTES = {
-  sun: {
-    name: "보리",
-    fur: 0xf7c969,
-    furDark: 0xdea345,
-    accent: 0xef6c56,
-    cheeks: 0xef9479
-  },
-  mint: {
-    name: "모모",
-    fur: 0x77cfac,
-    furDark: 0x4ca583,
-    accent: 0x4f8ed0,
-    cheeks: 0xf09b91
-  },
-  berry: {
-    name: "두두",
-    fur: 0xe995a9,
-    furDark: 0xc86883,
-    accent: 0x806bc0,
-    cheeks: 0xf5ac9f
-  }
-};
+const STORAGE_PREFIX = "pizza-village-25d:";
+const START_POSITION = new THREE.Vector3(-1.8, 0, 6.2);
+const DOOR_POSITION = new THREE.Vector3(5.5, 0, -3.15);
+const PLAYER_RADIUS = 0.42;
+const VIEW_HEIGHT = 12.5;
 
 const ui = {
-  select: document.querySelector("#character-select"),
-  cards: [...document.querySelectorAll(".character-card")],
-  gameScreen: document.querySelector("#game-screen"),
   gameRoot: document.querySelector("#game-root"),
+  startScreen: document.querySelector("#start-screen"),
+  startButton: document.querySelector("#start-button"),
   homeButton: document.querySelector("#home-button"),
   soundButton: document.querySelector("#sound-button"),
   joystickZone: document.querySelector("#joystick-zone"),
   joystickStick: document.querySelector("#joystick-stick"),
   actionButton: document.querySelector("#action-button"),
-  actionIcon: document.querySelector("#action-icon"),
   actionLabel: document.querySelector("#action-label"),
-  objectiveStart: document.querySelector("#objective-start"),
-  objectiveEnd: document.querySelector("#objective-end"),
   objectiveText: document.querySelector("#objective-text"),
   toast: document.querySelector("#scene-toast")
 };
@@ -50,93 +24,72 @@ const ui = {
 const controls = {
   x: 0,
   y: 0,
-  actionQueued: false,
   activePointer: null,
-  lastInputAt: performance.now()
+  actionQueued: false,
+  keys: new Set()
 };
 
-let game = null;
-let selectedCharacter = localStorage.getItem(`${STORAGE_PREFIX}character`) || "sun";
-let soundMuted = localStorage.getItem(`${STORAGE_PREFIX}muted`) === "true";
+let started = false;
+let muted = localStorage.getItem(`${STORAGE_PREFIX}muted`) === "true";
 let audioContext = null;
 let toastTimer = null;
-let actionUiState = "";
+let doorOpen = false;
+let doorTargetRotation = 0;
+let nearDoor = false;
+let lastTime = performance.now();
+let walkClock = 0;
 
 function ensureAudio() {
-  if (soundMuted) return;
+  if (muted) return;
   if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
   if (audioContext.state === "suspended") audioContext.resume();
 }
 
-function playTone(frequency, duration = 0.1, type = "sine", volume = 0.025, delay = 0, endFrequency = null) {
-  if (soundMuted) return;
+function playTone(frequency, duration = 0.1, delay = 0, volume = 0.025) {
+  if (muted) return;
   ensureAudio();
   if (!audioContext) return;
-
-  const start = audioContext.currentTime + delay;
+  const startAt = audioContext.currentTime + delay;
   const oscillator = audioContext.createOscillator();
   const gain = audioContext.createGain();
-  oscillator.type = type;
-  oscillator.frequency.setValueAtTime(frequency, start);
-  if (endFrequency) oscillator.frequency.exponentialRampToValueAtTime(endFrequency, start + duration);
-  gain.gain.setValueAtTime(0.0001, start);
-  gain.gain.linearRampToValueAtTime(volume, start + 0.015);
-  gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+  oscillator.type = "triangle";
+  oscillator.frequency.setValueAtTime(frequency, startAt);
+  gain.gain.setValueAtTime(0.0001, startAt);
+  gain.gain.linearRampToValueAtTime(volume, startAt + 0.015);
+  gain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
   oscillator.connect(gain).connect(audioContext.destination);
-  oscillator.start(start);
-  oscillator.stop(start + duration + 0.03);
+  oscillator.start(startAt);
+  oscillator.stop(startAt + duration + 0.03);
 }
 
-function playSelectSound() {
-  playTone(440, 0.1, "triangle", 0.035);
-  playTone(660, 0.16, "triangle", 0.03, 0.09);
+function playStartSound() {
+  playTone(392, 0.12, 0, 0.03);
+  playTone(523, 0.14, 0.1, 0.028);
+  playTone(659, 0.18, 0.2, 0.026);
 }
 
 function playDoorSound() {
-  playTone(523, 0.15, "triangle", 0.035);
-  playTone(659, 0.15, "triangle", 0.033, 0.11);
-  playTone(784, 0.22, "triangle", 0.03, 0.22);
+  playTone(330, 0.11, 0, 0.025);
+  playTone(494, 0.15, 0.1, 0.022);
 }
 
-function playStepSound(stepIndex) {
-  playTone(stepIndex % 2 ? 122 : 138, 0.055, "sine", 0.012, 0, 94);
-}
-
-function setObjective(start, end, text) {
-  ui.objectiveStart.textContent = start;
-  ui.objectiveEnd.textContent = end;
-  ui.objectiveText.textContent = text;
-}
-
-function setActionUi(icon, label, ready = false) {
-  const nextState = `${icon}|${label}|${ready}`;
-  if (nextState === actionUiState) return;
-  actionUiState = nextState;
-  ui.actionIcon.textContent = icon;
-  ui.actionLabel.textContent = label;
-  ui.actionButton.classList.toggle("is-ready", ready);
-  ui.actionButton.setAttribute("aria-label", label);
-}
-
-function showToast(message, duration = 1250) {
+function showToast(message, duration = 1500) {
   window.clearTimeout(toastTimer);
   ui.toast.textContent = message;
   ui.toast.classList.add("is-visible");
   toastTimer = window.setTimeout(() => ui.toast.classList.remove("is-visible"), duration);
 }
 
-function resetControls() {
-  controls.x = 0;
-  controls.y = 0;
-  controls.actionQueued = false;
-  controls.activePointer = null;
-  ui.joystickStick.style.transform = "translate(0px, 0px)";
+function setAction(label, ready) {
+  ui.actionLabel.textContent = label;
+  ui.actionButton.setAttribute("aria-label", label);
+  ui.actionButton.classList.toggle("is-ready", ready);
 }
 
 function setupJoystick() {
-  const maxDistance = 42;
+  const maxDistance = 38;
 
-  function updateFromPointer(event) {
+  function updatePointer(event) {
     const rect = ui.joystickZone.getBoundingClientRect();
     const centerX = rect.left + rect.width / 2;
     const centerY = rect.top + rect.height / 2;
@@ -148,701 +101,640 @@ function setupJoystick() {
     const y = rawY * scale;
     controls.x = x / maxDistance;
     controls.y = y / maxDistance;
-    controls.lastInputAt = performance.now();
     ui.joystickStick.style.transform = `translate(${x}px, ${y}px)`;
-    ui.joystickZone.classList.remove("is-idle");
+  }
+
+  function release(event) {
+    if (event.pointerId !== controls.activePointer) return;
+    controls.activePointer = null;
+    controls.x = 0;
+    controls.y = 0;
+    ui.joystickStick.style.transform = "translate(0, 0)";
   }
 
   ui.joystickZone.addEventListener("pointerdown", (event) => {
-    if (controls.activePointer !== null) return;
+    if (!started || controls.activePointer !== null) return;
     controls.activePointer = event.pointerId;
     ui.joystickZone.setPointerCapture(event.pointerId);
-    updateFromPointer(event);
+    updatePointer(event);
     ensureAudio();
   });
-
   ui.joystickZone.addEventListener("pointermove", (event) => {
     if (event.pointerId !== controls.activePointer) return;
     event.preventDefault();
-    updateFromPointer(event);
+    updatePointer(event);
+  });
+  ui.joystickZone.addEventListener("pointerup", release);
+  ui.joystickZone.addEventListener("pointercancel", release);
+}
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xcbe7df);
+scene.fog = new THREE.Fog(0xcbe7df, 22, 38);
+
+const camera = new THREE.OrthographicCamera(-10, 10, 6, -6, 0.1, 80);
+const cameraFocus = new THREE.Vector3(0.7, 0.8, 1.2);
+const cameraOffset = new THREE.Vector3(11.5, 13.5, 16.5);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+ui.gameRoot.appendChild(renderer.domElement);
+
+const hemi = new THREE.HemisphereLight(0xfff8df, 0x668868, 2.35);
+scene.add(hemi);
+
+const sun = new THREE.DirectionalLight(0xfff3d2, 3.2);
+sun.position.set(-10, 18, 12);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.camera.left = -18;
+sun.shadow.camera.right = 18;
+sun.shadow.camera.top = 18;
+sun.shadow.camera.bottom = -18;
+sun.shadow.camera.near = 1;
+sun.shadow.camera.far = 45;
+sun.shadow.bias = -0.0006;
+scene.add(sun);
+
+const COLORS = {
+  grass: 0x78ad5e,
+  grassDark: 0x4f8149,
+  path: 0xe6c98d,
+  pathEdge: 0xcba96c,
+  cream: 0xffe8b5,
+  wall: 0xf5dca4,
+  wallShade: 0xd5b983,
+  red: 0xc94d3c,
+  terracotta: 0xc85b3d,
+  wood: 0x895535,
+  woodDark: 0x5b382a,
+  teal: 0x3f7f78,
+  leaf: 0x4f8e52,
+  leafLight: 0x78aa58,
+  water: 0x57aebb,
+  ink: 0x3b3a32
+};
+
+function toon(color, options = {}) {
+  return new THREE.MeshToonMaterial({ color, ...options });
+}
+
+function shadowed(mesh, receive = true) {
+  mesh.castShadow = true;
+  mesh.receiveShadow = receive;
+  return mesh;
+}
+
+function addBox(group, size, position, material, rotation = null) {
+  const mesh = shadowed(new THREE.Mesh(new THREE.BoxGeometry(...size), material));
+  mesh.position.set(...position);
+  if (rotation) mesh.rotation.set(...rotation);
+  group.add(mesh);
+  return mesh;
+}
+
+const world = new THREE.Group();
+scene.add(world);
+
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(32, 24), toon(COLORS.grass));
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -0.09;
+ground.receiveShadow = true;
+world.add(ground);
+
+function addGroundDisc(x, z, radius, color, y = -0.035) {
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(radius, 40), toon(color));
+  disc.rotation.x = -Math.PI / 2;
+  disc.position.set(x, y, z);
+  disc.receiveShadow = true;
+  world.add(disc);
+  return disc;
+}
+
+function addPathStrip(x, z, width, depth, rotation = 0) {
+  const strip = new THREE.Mesh(new THREE.BoxGeometry(width, 0.09, depth), toon(COLORS.path));
+  strip.position.set(x, -0.025, z);
+  strip.rotation.y = rotation;
+  strip.receiveShadow = true;
+  world.add(strip);
+  return strip;
+}
+
+addGroundDisc(0.7, 1.6, 5.2, COLORS.pathEdge, -0.06);
+addGroundDisc(0.7, 1.6, 4.95, COLORS.path, -0.02);
+addPathStrip(-1.1, 6.0, 4.2, 8.2, -0.05);
+addPathStrip(3.5, -1.2, 4.1, 8.3, -0.67);
+addGroundDisc(5.2, -3.0, 2.25, COLORS.path, -0.015);
+
+const colliders = [];
+
+function addTree(x, z, scale = 1, leafColor = COLORS.leaf) {
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  const trunk = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(0.24 * scale, 0.34 * scale, 2.2 * scale, 7), toon(COLORS.wood)));
+  trunk.position.y = 1.05 * scale;
+  group.add(trunk);
+
+  const crownMat = toon(leafColor);
+  const crownLight = toon(COLORS.leafLight);
+  [
+    [-0.42, 2.35, 0.86, crownMat],
+    [0.4, 2.45, 0.8, crownMat],
+    [0, 3.0, 0.95, crownLight]
+  ].forEach(([cx, cy, radius, material]) => {
+    const crown = shadowed(new THREE.Mesh(new THREE.DodecahedronGeometry(radius * scale, 1), material));
+    crown.position.set(cx * scale, cy * scale, 0);
+    crown.rotation.y = cx;
+    group.add(crown);
+  });
+  world.add(group);
+  colliders.push({ type: "circle", x, z, radius: 0.55 * scale });
+  return group;
+}
+
+function addRock(x, z, scale = 1) {
+  const rock = shadowed(new THREE.Mesh(new THREE.DodecahedronGeometry(0.55 * scale, 0), toon(0xa8a28b)));
+  rock.scale.set(1.25, 0.7, 1);
+  rock.position.set(x, 0.35 * scale, z);
+  rock.rotation.set(0.1, x * 0.3, -0.08);
+  world.add(rock);
+  colliders.push({ type: "circle", x, z, radius: 0.48 * scale });
+}
+
+function addFence(x, z, length, rotation = 0) {
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  group.rotation.y = rotation;
+  const postMat = toon(COLORS.wood);
+  const railMat = toon(0xa86e3f);
+  const posts = Math.max(2, Math.round(length / 1.4));
+  for (let index = 0; index < posts; index += 1) {
+    const px = -length / 2 + (index / (posts - 1)) * length;
+    addBox(group, [0.18, 1.05, 0.18], [px, 0.52, 0], postMat);
+  }
+  addBox(group, [length, 0.15, 0.14], [0, 0.78, 0], railMat);
+  addBox(group, [length, 0.13, 0.14], [0, 0.38, 0], railMat);
+  world.add(group);
+  return group;
+}
+
+function addFlowerPatch(x, z, color) {
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  for (let index = 0; index < 5; index += 1) {
+    const angle = index * 2.4;
+    const radius = 0.18 + (index % 2) * 0.1;
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.02, 0.28, 5), toon(0x3e7444));
+    stem.position.set(Math.cos(angle) * radius, 0.14, Math.sin(angle) * radius);
+    group.add(stem);
+    const flower = new THREE.Mesh(new THREE.IcosahedronGeometry(0.095, 0), toon(index === 2 ? 0xffd65c : color));
+    flower.position.set(stem.position.x, 0.32, stem.position.z);
+    group.add(flower);
+  }
+  world.add(group);
+}
+
+function createPond() {
+  addGroundDisc(-7.3, 3.6, 2.65, 0x477a58, -0.045);
+  const pond = addGroundDisc(-7.3, 3.6, 2.35, COLORS.water, -0.02);
+  pond.material = new THREE.MeshToonMaterial({ color: COLORS.water, transparent: true, opacity: 0.92 });
+  const lily = addGroundDisc(-6.7, 3.1, 0.34, 0x79a956, 0.005);
+  lily.scale.y = 0.68;
+  [-9.25, -5.25].forEach((x) => addRock(x, 3.75, 0.85));
+  colliders.push({ type: "circle", x: -7.3, z: 3.6, radius: 2.2 });
+}
+
+function createPizzaShop() {
+  const shop = new THREE.Group();
+  shop.position.set(5.5, 0, -5.25);
+  world.add(shop);
+
+  const wallMat = toon(COLORS.wall);
+  const shadeMat = toon(COLORS.wallShade);
+  addBox(shop, [6.2, 3.5, 4.4], [0, 1.75, 0], wallMat);
+  addBox(shop, [6.3, 0.28, 4.5], [0, 0.15, 0], shadeMat);
+
+  const roofMat = toon(COLORS.terracotta);
+  addBox(shop, [3.65, 0.34, 5.2], [-1.45, 3.92, 0], roofMat, [0, 0, -0.46]);
+  addBox(shop, [3.65, 0.34, 5.2], [1.45, 3.92, 0], roofMat, [0, 0, 0.46]);
+  for (let index = -2; index <= 2; index += 1) {
+    addBox(shop, [0.12, 0.08, 5.23], [index * 0.72, 4.35 - Math.abs(index) * 0.33, 0], toon(0xe48153));
+  }
+
+  const chimney = addBox(shop, [0.7, 2.0, 0.7], [1.9, 4.6, -0.65], shadeMat);
+  chimney.castShadow = true;
+  addBox(shop, [0.9, 0.24, 0.9], [1.9, 5.55, -0.65], roofMat);
+
+  const frontZ = 2.23;
+  const windowMat = new THREE.MeshToonMaterial({ color: 0x8fd0cc, emissive: 0x254e46, emissiveIntensity: 0.25 });
+  [-2.0, 2.0].forEach((x) => {
+    addBox(shop, [1.15, 1.18, 0.12], [x, 1.72, frontZ], toon(COLORS.woodDark));
+    addBox(shop, [0.91, 0.93, 0.14], [x, 1.72, frontZ + 0.03], windowMat);
+    addBox(shop, [0.08, 0.98, 0.17], [x, 1.72, frontZ + 0.08], toon(0xffe7b0));
+    addBox(shop, [0.96, 0.08, 0.17], [x, 1.72, frontZ + 0.08], toon(0xffe7b0));
   });
 
-  function releaseJoystick(event) {
-    if (event.pointerId !== controls.activePointer) return;
-    resetControls();
+  const awning = new THREE.Group();
+  awning.position.set(0, 2.75, frontZ + 0.33);
+  shop.add(awning);
+  for (let index = 0; index < 9; index += 1) {
+    const color = index % 2 === 0 ? COLORS.red : COLORS.cream;
+    const stripe = addBox(awning, [0.48, 0.24, 0.82], [(index - 4) * 0.47, 0, 0], toon(color), [-0.16, 0, 0]);
+    stripe.castShadow = true;
   }
 
-  ui.joystickZone.addEventListener("pointerup", releaseJoystick);
-  ui.joystickZone.addEventListener("pointercancel", releaseJoystick);
-
-  window.setInterval(() => {
-    const shouldTeach = controls.activePointer === null && performance.now() - controls.lastInputAt > 5500;
-    ui.joystickZone.classList.toggle("is-idle", shouldTeach);
-  }, 900);
-}
-
-function launchGame(characterKey) {
-  selectedCharacter = characterKey;
-  localStorage.setItem(`${STORAGE_PREFIX}character`, characterKey);
-  playSelectSound();
-  ui.select.classList.add("is-hidden");
-  ui.gameScreen.classList.remove("is-hidden");
-  resetControls();
-
-  game = new Phaser.Game({
-    type: Phaser.AUTO,
-    parent: "game-root",
-    width: GAME_WIDTH,
-    height: GAME_HEIGHT,
-    backgroundColor: "#79d3cd",
-    transparent: false,
-    render: {
-      antialias: true,
-      roundPixels: true,
-      powerPreference: "high-performance"
-    },
-    scale: {
-      mode: Phaser.Scale.FIT,
-      autoCenter: Phaser.Scale.CENTER_BOTH,
-      width: GAME_WIDTH,
-      height: GAME_HEIGHT
-    },
-    physics: {
-      default: "arcade",
-      arcade: {
-        gravity: { x: 0, y: 0 },
-        debug: false
-      }
-    },
-    scene: [TownScene, PizzaShopScene]
-  });
-}
-
-function returnToSelection() {
-  if (game) {
-    game.destroy(true);
-    game = null;
-  }
-  resetControls();
-  ui.gameRoot.replaceChildren();
-  ui.gameScreen.classList.add("is-hidden");
-  ui.select.classList.remove("is-hidden");
-  setActionUi("✦", "행동", false);
-}
-
-function createHeroTextures(scene, characterKey) {
-  const palette = CHARACTER_PALETTES[characterKey];
-  const outline = 0x365355;
-  const directions = ["down", "up", "side"];
-
-  for (const direction of directions) {
-    for (let frame = 0; frame < 4; frame += 1) {
-      const key = `hero-${characterKey}-${direction}-${frame}`;
-      if (scene.textures.exists(key)) continue;
-
-      const graphics = scene.make.graphics({ x: 0, y: 0, add: false });
-      const stride = [0, 5, 0, -5][frame];
-      const bounce = [0, -2, 0, -1][frame];
-
-      graphics.fillStyle(0x355d5b, 0.2);
-      graphics.fillEllipse(48, 103, 57 - Math.abs(stride), 13);
-
-      if (direction === "side") {
-        graphics.fillStyle(palette.furDark, 1);
-        graphics.lineStyle(4, outline, 1);
-        graphics.fillEllipse(23, 69, 35, 25);
-        graphics.strokeEllipse(23, 69, 35, 25);
-      }
-
-      graphics.fillStyle(palette.furDark, 1);
-      graphics.lineStyle(4, outline, 1);
-      graphics.fillRoundedRect(27 - stride, 82, 24, 22, 10);
-      graphics.strokeRoundedRect(27 - stride, 82, 24, 22, 10);
-      graphics.fillRoundedRect(49 + stride, 82, 24, 22, 10);
-      graphics.strokeRoundedRect(49 + stride, 82, 24, 22, 10);
-
-      graphics.fillStyle(palette.fur, 1);
-      graphics.fillRoundedRect(22, 48 + bounce, 52, 47, 21);
-      graphics.strokeRoundedRect(22, 48 + bounce, 52, 47, 21);
-
-      graphics.fillStyle(palette.accent, 1);
-      graphics.fillRoundedRect(20, 55 + bounce, 56, 15, 7);
-      graphics.strokeRoundedRect(20, 55 + bounce, 56, 15, 7);
-      graphics.fillTriangle(65, 65 + bounce, 83, 73 + bounce, 68, 78 + bounce);
-      graphics.strokeTriangle(65, 65 + bounce, 83, 73 + bounce, 68, 78 + bounce);
-
-      graphics.fillStyle(palette.furDark, 1);
-      if (direction === "side") {
-        graphics.fillTriangle(27, 24 + bounce, 34, 2 + bounce, 46, 26 + bounce);
-        graphics.strokeTriangle(27, 24 + bounce, 34, 2 + bounce, 46, 26 + bounce);
-        graphics.fillTriangle(53, 24 + bounce, 70, 5 + bounce, 69, 31 + bounce);
-        graphics.strokeTriangle(53, 24 + bounce, 70, 5 + bounce, 69, 31 + bounce);
-      } else {
-        graphics.fillTriangle(20, 29 + bounce, 29, 4 + bounce, 42, 28 + bounce);
-        graphics.strokeTriangle(20, 29 + bounce, 29, 4 + bounce, 42, 28 + bounce);
-        graphics.fillTriangle(55, 28 + bounce, 69, 4 + bounce, 77, 32 + bounce);
-        graphics.strokeTriangle(55, 28 + bounce, 69, 4 + bounce, 77, 32 + bounce);
-      }
-
-      graphics.fillStyle(palette.fur, 1);
-      graphics.fillEllipse(48, 37 + bounce, 65, 58);
-      graphics.strokeEllipse(48, 37 + bounce, 65, 58);
-
-      if (direction === "down") {
-        graphics.fillStyle(outline, 1);
-        graphics.fillEllipse(36, 38 + bounce, 7, 11);
-        graphics.fillEllipse(60, 38 + bounce, 7, 11);
-        graphics.fillTriangle(45, 48 + bounce, 51, 48 + bounce, 48, 53 + bounce);
-        graphics.lineStyle(3, outline, 1);
-        graphics.beginPath();
-        graphics.arc(48, 53 + bounce, 9, 0.24, Math.PI - 0.24, false);
-        graphics.strokePath();
-        graphics.fillStyle(palette.cheeks, 0.8);
-        graphics.fillEllipse(26, 49 + bounce, 10, 6);
-        graphics.fillEllipse(70, 49 + bounce, 10, 6);
-      } else if (direction === "side") {
-        graphics.fillStyle(outline, 1);
-        graphics.fillEllipse(63, 38 + bounce, 7, 11);
-        graphics.fillTriangle(70, 47 + bounce, 78, 50 + bounce, 70, 53 + bounce);
-        graphics.fillStyle(palette.cheeks, 0.8);
-        graphics.fillEllipse(63, 51 + bounce, 10, 6);
-      } else {
-        graphics.fillStyle(palette.furDark, 0.8);
-        graphics.fillEllipse(48, 29 + bounce, 26, 12);
-      }
-
-      graphics.generateTexture(key, 96, 112);
-      graphics.destroy();
-    }
-  }
-}
-
-function addPhysicsBarrier(scene, x, y, width, height) {
-  const barrier = scene.add.rectangle(x, y, width, height, 0x000000, 0);
-  scene.physics.add.existing(barrier, true);
-  scene.physics.add.collider(scene.player, barrier);
-  return barrier;
-}
-
-function addTree(scene, x, y, scale = 1, tint = 0x5db16a) {
-  const shadow = scene.add.ellipse(x, y + 40 * scale, 116 * scale, 33 * scale, 0x2f6251, 0.18).setDepth(y - 1);
-  const trunk = scene.add.rectangle(x, y + 7 * scale, 31 * scale, 76 * scale, 0x9a653e).setStrokeStyle(5 * scale, 0x4c5a50).setDepth(y);
-  const crownBack = scene.add.circle(x - 35 * scale, y - 45 * scale, 47 * scale, tint).setStrokeStyle(6 * scale, 0x3e6256).setDepth(y + 1);
-  const crownRight = scene.add.circle(x + 35 * scale, y - 44 * scale, 45 * scale, tint).setStrokeStyle(6 * scale, 0x3e6256).setDepth(y + 1);
-  const crown = scene.add.circle(x, y - 75 * scale, 59 * scale, Phaser.Display.Color.IntegerToColor(tint).brighten(8).color).setStrokeStyle(6 * scale, 0x3e6256).setDepth(y + 2);
-  const dot1 = scene.add.circle(x - 24 * scale, y - 76 * scale, 8 * scale, 0xa9df76).setDepth(y + 3);
-  const dot2 = scene.add.circle(x + 20 * scale, y - 48 * scale, 7 * scale, 0xa9df76).setDepth(y + 3);
-  addPhysicsBarrier(scene, x, y + 24 * scale, 72 * scale, 46 * scale);
-  return [shadow, trunk, crownBack, crownRight, crown, dot1, dot2];
-}
-
-function addFlower(scene, x, y, color) {
-  const stem = scene.add.rectangle(x, y, 4, 21, 0x44885d).setDepth(y);
-  const petals = [
-    scene.add.circle(x - 6, y - 9, 7, color),
-    scene.add.circle(x + 6, y - 9, 7, color),
-    scene.add.circle(x, y - 15, 7, color),
-    scene.add.circle(x, y - 5, 7, color),
-    scene.add.circle(x, y - 10, 5, 0xffda5e)
-  ];
-  petals.forEach((petal) => petal.setDepth(y + 1));
-  return [stem, ...petals];
-}
-
-function addTownGround(scene) {
-  const ground = scene.add.graphics().setDepth(0);
-  ground.fillStyle(0x86cb73, 1);
-  ground.fillRect(0, 0, 2200, 1350);
-
-  ground.fillStyle(0x78bd68, 1);
-  for (let x = 60; x < 2200; x += 135) {
-    for (let y = 80; y < 1350; y += 120) {
-      const offset = ((x + y) / 15) % 3;
-      ground.fillCircle(x + offset * 9, y + offset * 4, 4);
-      ground.fillCircle(x + 14 + offset * 8, y - 5, 3);
-    }
-  }
-
-  ground.fillStyle(0xe6c987, 1);
-  ground.fillRoundedRect(130, 694, 1880, 190, 95);
-  ground.fillRoundedRect(1120, 390, 250, 760, 115);
-  ground.fillCircle(880, 790, 300);
-  ground.fillStyle(0xf1dda4, 1);
-  ground.fillRoundedRect(155, 728, 1800, 48, 24);
-  ground.fillRoundedRect(1203, 415, 54, 680, 27);
-  ground.lineStyle(8, 0xcaa964, 0.5);
-  ground.strokeCircle(880, 790, 290);
-}
-
-function addPizzaShop(scene) {
-  const x = 1280;
-  const baseY = 590;
-  const building = scene.add.container(x, baseY).setDepth(baseY - 15);
-  const graphics = scene.add.graphics();
-
-  graphics.fillStyle(0x315957, 0.2);
-  graphics.fillEllipse(-255, 122, 510, 70);
-
-  graphics.fillStyle(0xfff0cb, 1);
-  graphics.lineStyle(8, 0x405a59, 1);
-  graphics.fillRoundedRect(-230, -200, 460, 310, 28);
-  graphics.strokeRoundedRect(-230, -200, 460, 310, 28);
-
-  graphics.fillStyle(0xe96555, 1);
-  graphics.beginPath();
-  graphics.moveTo(-265, -182);
-  graphics.lineTo(0, -360);
-  graphics.lineTo(265, -182);
-  graphics.closePath();
-  graphics.fillPath();
-  graphics.strokePath();
-  graphics.fillStyle(0xffaa62, 1);
-  graphics.fillTriangle(-213, -186, 0, -326, 213, -186);
-
-  graphics.fillStyle(0x73bdd0, 1);
-  graphics.fillRoundedRect(-180, -115, 115, 96, 16);
-  graphics.strokeRoundedRect(-180, -115, 115, 96, 16);
-  graphics.lineStyle(5, 0xffffff, 0.8);
-  graphics.lineBetween(-122, -112, -122, -22);
-  graphics.lineBetween(-176, -67, -68, -67);
-
-  graphics.fillStyle(0x73bdd0, 1);
-  graphics.lineStyle(8, 0x405a59, 1);
-  graphics.fillRoundedRect(65, -115, 115, 96, 16);
-  graphics.strokeRoundedRect(65, -115, 115, 96, 16);
-  graphics.lineStyle(5, 0xffffff, 0.8);
-  graphics.lineBetween(122, -112, 122, -22);
-  graphics.lineBetween(69, -67, 176, -67);
-
-  graphics.fillStyle(0x55a58a, 1);
-  graphics.lineStyle(8, 0x405a59, 1);
-  graphics.fillRoundedRect(-58, -28, 116, 139, 18);
-  graphics.strokeRoundedRect(-58, -28, 116, 139, 18);
-  graphics.fillStyle(0x9ddac1, 1);
-  graphics.fillRoundedRect(-38, -9, 76, 70, 12);
-  graphics.fillStyle(0xffd75f, 1);
-  graphics.fillCircle(34, 79, 7);
-
-  graphics.fillStyle(0xffd76b, 1);
-  graphics.lineStyle(8, 0x405a59, 1);
-  graphics.fillCircle(0, -205, 62);
-  graphics.strokeCircle(0, -205, 62);
-  graphics.fillStyle(0xef7058, 1);
-  graphics.fillCircle(0, -205, 43);
-  graphics.fillStyle(0xffe69b, 1);
-  graphics.fillCircle(0, -205, 34);
-  graphics.fillStyle(0xd6534c, 1);
-  graphics.fillCircle(-13, -216, 7);
-  graphics.fillCircle(15, -195, 7);
-  graphics.fillCircle(12, -222, 6);
-
-  building.add(graphics);
-  scene.shopDoor = { x, y: baseY + 120 };
-  scene.shopDoorGlow = scene.add.ellipse(x, baseY + 112, 150, 54, 0xffe16f, 0.25).setDepth(baseY + 100);
-  scene.shopBeacon = scene.add.text(x, baseY - 76, "▼", {
-    fontFamily: "Arial Rounded MT Bold, sans-serif",
-    fontSize: "54px",
-    color: "#ff715f",
-    stroke: "#fff8dc",
-    strokeThickness: 8
-  }).setOrigin(0.5).setDepth(baseY + 500);
-  scene.tweens.add({ targets: [scene.shopBeacon], y: baseY - 56, duration: 620, yoyo: true, repeat: -1, ease: "Sine.InOut" });
-  scene.tweens.add({ targets: scene.shopDoorGlow, scaleX: 1.16, scaleY: 1.16, alpha: 0.43, duration: 740, yoyo: true, repeat: -1 });
-
-  addPhysicsBarrier(scene, x, baseY - 40, 500, 360);
-}
-
-function addOtherTownDetails(scene) {
-  const fountainBase = scene.add.ellipse(840, 795, 290, 190, 0x6d7771).setStrokeStyle(8, 0x405a59).setDepth(777);
-  const fountainWater = scene.add.ellipse(840, 775, 240, 138, 0x64c8dc).setStrokeStyle(8, 0x405a59).setDepth(778);
-  const fountainCenter = scene.add.circle(840, 738, 42, 0xffdf8d).setStrokeStyle(7, 0x405a59).setDepth(779);
-  const fountainStar = scene.add.text(840, 720, "★", { fontSize: "54px", color: "#fff7c7", stroke: "#e3a84d", strokeThickness: 6 }).setOrigin(0.5).setDepth(780);
-  scene.tweens.add({ targets: fountainStar, scale: 1.08, duration: 850, yoyo: true, repeat: -1, ease: "Sine.InOut" });
-  addPhysicsBarrier(scene, 840, 785, 246, 145);
-
-  const notice = scene.add.container(390, 690).setDepth(690);
-  notice.add(scene.add.rectangle(0, 22, 24, 112, 0x8f633e).setStrokeStyle(5, 0x405a59));
-  notice.add(scene.add.rectangle(0, -35, 175, 108, 0xffe8a8).setStrokeStyle(7, 0x405a59));
-  notice.add(scene.add.text(0, -35, "🍕  →", { fontSize: "40px" }).setOrigin(0.5));
-  addPhysicsBarrier(scene, 390, 705, 150, 70);
-
-  const pond = scene.add.ellipse(1830, 1030, 390, 230, 0x59bdd2).setStrokeStyle(18, 0x72ae69).setDepth(1000);
-  scene.add.ellipse(1770, 990, 77, 31, 0x70b96c).setDepth(1002);
-  scene.add.circle(1783, 981, 11, 0xffd765).setDepth(1003);
-  scene.add.ellipse(1905, 1065, 58, 25, 0x70b96c).setDepth(1002);
-  addPhysicsBarrier(scene, 1830, 1030, 360, 190);
-
-  scene.add.rectangle(480, 1090, 270, 46, 0xb9784a).setStrokeStyle(7, 0x405a59).setDepth(1090);
-  scene.add.rectangle(390, 1130, 25, 90, 0x875b3c).setDepth(1089);
-  scene.add.rectangle(570, 1130, 25, 90, 0x875b3c).setDepth(1089);
-  addPhysicsBarrier(scene, 480, 1100, 300, 78);
-
-  addTree(scene, 160, 360, 1.08, 0x55a968);
-  addTree(scene, 430, 300, 0.86, 0x67b770);
-  addTree(scene, 1880, 330, 1.05, 0x5eaf6c);
-  addTree(scene, 2050, 665, 0.8, 0x69b770);
-  addTree(scene, 210, 1180, 0.9, 0x58ad68);
-  addTree(scene, 1460, 1160, 0.92, 0x5eb36b);
-
-  const flowerColors = [0xff8e91, 0xffd466, 0x9b83d8, 0xffa85f];
-  [[620, 440], [690, 460], [1540, 790], [1610, 820], [1010, 1100], [1070, 1125], [1880, 760], [350, 920]].forEach(([x, y], index) => {
-    addFlower(scene, x, y, flowerColors[index % flowerColors.length]);
+  const sign = new THREE.Mesh(new THREE.CircleGeometry(0.65, 24), toon(COLORS.cream));
+  sign.position.set(0, 3.47, frontZ + 0.04);
+  shop.add(sign);
+  const sauce = new THREE.Mesh(new THREE.CircleGeometry(0.46, 24), toon(0xe59b45));
+  sauce.position.set(0, 3.47, frontZ + 0.07);
+  shop.add(sauce);
+  [[-0.15, 0.12], [0.18, 0.11], [0.07, -0.17]].forEach(([x, y]) => {
+    const topping = new THREE.Mesh(new THREE.CircleGeometry(0.075, 12), toon(COLORS.red));
+    topping.position.set(x, 3.47 + y, frontZ + 0.1);
+    shop.add(topping);
   });
 
-  void fountainBase;
-  void fountainWater;
-  void fountainCenter;
-  void pond;
+  const pivot = new THREE.Group();
+  pivot.position.set(-0.67, 0.05, frontZ + 0.07);
+  shop.add(pivot);
+  const door = addBox(pivot, [1.34, 2.35, 0.16], [0.67, 1.18, 0], toon(COLORS.teal));
+  addBox(pivot, [0.82, 0.76, 0.05], [0.67, 1.55, 0.11], windowMat);
+  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.085, 10, 8), toon(0xffcf5a));
+  knob.position.set(1.12, 1.02, 0.15);
+  pivot.add(knob);
+
+  const light = new THREE.PointLight(0xffbd63, 1.4, 5.5);
+  light.position.set(0, 1.45, frontZ + 0.55);
+  shop.add(light);
+
+  colliders.push({ type: "box", x: 5.5, z: -5.25, width: 6.7, depth: 4.25 });
+  return { group: shop, doorPivot: pivot, doorMesh: door, light };
 }
 
-function createPlayer(scene, x, y) {
-  createHeroTextures(scene, selectedCharacter);
-  scene.player = scene.physics.add.sprite(x, y, `hero-${selectedCharacter}-down-0`);
-  scene.player.setDepth(y);
-  scene.player.setCollideWorldBounds(true);
-  scene.player.body.setSize(52, 42);
-  scene.player.body.setOffset(22, 63);
-  scene.player.direction = "down";
-  scene.player.nextStepAt = 0;
-  scene.player.stepIndex = 0;
-  scene.player.setScale(1.04);
-  return scene.player;
+createPond();
+addFence(-8.1, -1.0, 5.2, 0.02);
+addFence(9.1, 2.8, 5.0, Math.PI / 2);
+addFence(-2.0, -8.0, 5.0, 0);
+
+[
+  [-10.2, -4.5, 1.15],
+  [-7.2, -5.8, 0.95],
+  [-1.7, -6.7, 1.1],
+  [10.2, -5.9, 1.05],
+  [10.5, 5.7, 1.1],
+  [5.0, 7.6, 0.9],
+  [-10.7, 7.0, 1.0]
+].forEach(([x, z, scale], index) => addTree(x, z, scale, index % 2 ? 0x56894c : COLORS.leaf));
+
+[
+  [-4.2, -2.4, 0xffd15c],
+  [8.8, -1.3, 0xf17861],
+  [2.7, 7.7, 0xf4eee0],
+  [-3.3, 5.9, 0xf17861]
+].forEach(([x, z, color]) => addFlowerPatch(x, z, color));
+
+addRock(-4.7, -5.6, 0.8);
+addRock(9.4, 7.2, 0.65);
+
+const shop = createPizzaShop();
+
+function createDoorMarker() {
+  const group = new THREE.Group();
+  group.position.copy(DOOR_POSITION);
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.62, 0.76, 36),
+    new THREE.MeshBasicMaterial({ color: 0xffc851, transparent: true, opacity: 0.68, side: THREE.DoubleSide })
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.04;
+  group.add(ring);
+  world.add(group);
+  return group;
 }
 
-function readKeyboard(scene) {
-  const left = scene.keys.left.isDown || scene.keys.a.isDown;
-  const right = scene.keys.right.isDown || scene.keys.d.isDown;
-  const up = scene.keys.up.isDown || scene.keys.w.isDown;
-  const down = scene.keys.down.isDown || scene.keys.s.isDown;
-  return {
-    x: Number(right) - Number(left),
-    y: Number(down) - Number(up)
+const doorMarker = createDoorMarker();
+
+function pixelTexture(direction, step) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 32;
+  canvas.height = 40;
+  const context = canvas.getContext("2d");
+  context.imageSmoothingEnabled = false;
+
+  if (direction === "left") {
+    context.translate(32, 0);
+    context.scale(-1, 1);
+    direction = "right";
+  }
+
+  const colors = {
+    outline: "#49372f",
+    fur: "#c9884c",
+    light: "#e8b068",
+    dark: "#785039",
+    muzzle: "#dca66c",
+    red: "#c94c3e",
+    redLight: "#e46a4f",
+    teal: "#276d6c",
+    tealLight: "#3f8e85",
+    eye: "#302b29",
+    shine: "#fff5d6"
   };
-}
+  const rect = (x, y, width, height, color) => {
+    context.fillStyle = color;
+    context.fillRect(x, y, width, height);
+  };
+  const legShift = step ? 1 : 0;
 
-function updatePlayer(scene, time) {
-  const keyboard = readKeyboard(scene);
-  let x = controls.x + keyboard.x;
-  let y = controls.y + keyboard.y;
-  const length = Math.hypot(x, y);
-  const moving = length > 0.12;
-
-  if (moving) {
-    x /= Math.max(1, length);
-    y /= Math.max(1, length);
-    const speed = 260;
-    scene.player.setVelocity(x * speed, y * speed);
-
-    let direction;
-    if (Math.abs(x) > Math.abs(y)) {
-      direction = "side";
-      scene.player.setFlipX(x < 0);
-    } else {
-      direction = y < 0 ? "up" : "down";
-      scene.player.setFlipX(false);
-    }
-    scene.player.direction = direction;
-    const frame = Math.floor(time / 115) % 4;
-    scene.player.setTexture(`hero-${selectedCharacter}-${direction}-${frame}`);
-
-    if (time > scene.player.nextStepAt) {
-      scene.player.nextStepAt = time + 280;
-      scene.player.stepIndex += 1;
-      playStepSound(scene.player.stepIndex);
-    }
+  if (direction === "up") {
+    rect(9, 28 + legShift, 6, 8, colors.outline);
+    rect(18, 27 + (1 - legShift), 6, 9, colors.outline);
+    rect(10, 19, 14, 14, colors.outline);
+    rect(11, 19, 12, 13, colors.fur);
+    rect(6, 7, 20, 16, colors.outline);
+    rect(8, 7, 16, 15, colors.fur);
+    rect(6, 5, 6, 6, colors.outline);
+    rect(20, 5, 6, 6, colors.outline);
+    rect(7, 6, 4, 4, colors.dark);
+    rect(21, 6, 4, 4, colors.dark);
+    rect(8, 18, 16, 4, colors.red);
+    rect(6, 19, 5, 5, colors.redLight);
+    rect(12, 22, 3, 9, colors.teal);
+    rect(15, 27, 8, 6, colors.teal);
+    rect(16, 28, 6, 4, colors.tealLight);
+  } else if (direction === "right") {
+    rect(10, 29 + legShift, 6, 8, colors.outline);
+    rect(20, 28 + (1 - legShift), 6, 8, colors.outline);
+    rect(8, 18, 17, 15, colors.outline);
+    rect(10, 18, 14, 14, colors.fur);
+    rect(8, 7, 18, 16, colors.outline);
+    rect(9, 7, 17, 15, colors.fur);
+    rect(7, 5, 7, 6, colors.outline);
+    rect(8, 6, 5, 4, colors.dark);
+    rect(23, 12, 7, 8, colors.outline);
+    rect(23, 13, 6, 6, colors.muzzle);
+    rect(20, 10, 3, 4, colors.eye);
+    rect(21, 10, 1, 1, colors.shine);
+    rect(27, 15, 2, 2, colors.eye);
+    rect(8, 18, 18, 4, colors.red);
+    rect(8, 20, 5, 4, colors.redLight);
+    rect(19, 23, 3, 8, colors.teal);
+    rect(21, 27, 6, 6, colors.tealLight);
   } else {
-    scene.player.setVelocity(0, 0);
-    scene.player.setTexture(`hero-${selectedCharacter}-${scene.player.direction}-0`);
+    rect(8, 29 + legShift, 7, 8, colors.outline);
+    rect(18, 28 + (1 - legShift), 7, 9, colors.outline);
+    rect(7, 18, 18, 15, colors.outline);
+    rect(9, 18, 14, 14, colors.fur);
+    rect(6, 7, 20, 16, colors.outline);
+    rect(8, 7, 16, 15, colors.fur);
+    rect(5, 5, 7, 7, colors.outline);
+    rect(20, 5, 7, 7, colors.outline);
+    rect(7, 6, 4, 4, colors.dark);
+    rect(21, 6, 4, 4, colors.dark);
+    rect(9, 12, 4, 5, colors.eye);
+    rect(20, 12, 4, 5, colors.eye);
+    rect(10, 12, 1, 1, colors.shine);
+    rect(21, 12, 1, 1, colors.shine);
+    rect(11, 16, 11, 6, colors.muzzle);
+    rect(15, 17, 3, 3, colors.eye);
+    rect(7, 18, 18, 4, colors.red);
+    rect(20, 23, 3, 7, colors.teal);
+    rect(20, 27, 7, 6, colors.tealLight);
   }
 
-  scene.player.setDepth(scene.player.y + 4);
-  return moving;
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
+  return texture;
 }
 
-function addSparkle(scene, x, y, delay = 0) {
-  const sparkle = scene.add.text(x, y, "✦", {
-    fontSize: "24px",
-    color: "#fff4a8",
-    stroke: "#dfa75a",
-    strokeThickness: 4
-  }).setOrigin(0.5).setDepth(y + 200);
-  sparkle.setScale(0.45);
-  scene.tweens.add({
-    targets: sparkle,
-    scale: 1.05,
-    angle: 35,
-    alpha: 0.45,
-    duration: 780,
-    delay,
-    yoyo: true,
-    repeat: -1,
-    ease: "Sine.InOut"
-  });
-  return sparkle;
-}
-
-class TownScene extends Phaser.Scene {
-  constructor() {
-    super("TownScene");
-  }
-
-  create() {
-    this.physics.world.setBounds(0, 0, 2200, 1350);
-    addTownGround(this);
-    createPlayer(this, 720, 930);
-    addOtherTownDetails(this);
-    addPizzaShop(this);
-
-    this.keys = this.input.keyboard.addKeys({
-      up: Phaser.Input.Keyboard.KeyCodes.UP,
-      down: Phaser.Input.Keyboard.KeyCodes.DOWN,
-      left: Phaser.Input.Keyboard.KeyCodes.LEFT,
-      right: Phaser.Input.Keyboard.KeyCodes.RIGHT,
-      w: Phaser.Input.Keyboard.KeyCodes.W,
-      a: Phaser.Input.Keyboard.KeyCodes.A,
-      s: Phaser.Input.Keyboard.KeyCodes.S,
-      d: Phaser.Input.Keyboard.KeyCodes.D,
-      action: Phaser.Input.Keyboard.KeyCodes.SPACE
-    });
-
-    this.cameras.main.setBounds(0, 0, 2200, 1350);
-    this.cameras.main.startFollow(this.player, true, 0.09, 0.09);
-    this.cameras.main.setDeadzone(150, 100);
-    this.cameras.main.fadeIn(350, 255, 250, 226);
-
-    setObjective("🐾", "🍕", "피자가게로 가요");
-    setActionUi("✦", "행동", false);
-    controls.lastInputAt = performance.now();
-    this.nearDoor = false;
-    this.transitioning = false;
-    showToast("별빛마을에 어서 와요!", 1100);
-  }
-
-  enterPizzaShop() {
-    if (this.transitioning) return;
-    this.transitioning = true;
-    playDoorSound();
-    localStorage.setItem(`${STORAGE_PREFIX}visited-pizza`, "true");
-    this.player.setVelocity(0, 0);
-    this.cameras.main.fadeOut(340, 255, 245, 213);
-    this.time.delayedCall(350, () => this.scene.start("PizzaShopScene"));
-  }
-
-  hop() {
-    if (this.player.getData("hopping")) return;
-    this.player.setData("hopping", true);
-    playTone(360, 0.08, "triangle", 0.018, 0, 520);
-    this.tweens.add({
-      targets: this.player,
-      scaleX: 1.13,
-      scaleY: 0.94,
-      duration: 100,
-      yoyo: true,
-      onComplete: () => this.player.setData("hopping", false)
-    });
-  }
-
-  update(time) {
-    if (this.transitioning) return;
-    updatePlayer(this, time);
-    this.nearDoor = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.shopDoor.x, this.shopDoor.y) < 150;
-    setActionUi(this.nearDoor ? "🍕" : "✦", this.nearDoor ? "들어가기" : "행동", this.nearDoor);
-    this.shopDoorGlow.setAlpha(this.nearDoor ? 0.5 : 0.25);
-
-    if (Phaser.Input.Keyboard.JustDown(this.keys.action)) controls.actionQueued = true;
-    if (controls.actionQueued) {
-      controls.actionQueued = false;
-      this.nearDoor ? this.enterPizzaShop() : this.hop();
-    }
-  }
-}
-
-function drawShopInterior(scene) {
-  const graphics = scene.add.graphics().setDepth(0);
-  graphics.fillStyle(0xfff2d7, 1);
-  graphics.fillRect(0, 0, 1600, 900);
-
-  graphics.fillStyle(0xf3d58e, 1);
-  graphics.fillRect(0, 470, 1600, 430);
-  graphics.lineStyle(4, 0xd3ad68, 0.42);
-  for (let x = -200; x < 1800; x += 130) graphics.lineBetween(x, 470, x + 270, 900);
-  for (let y = 540; y < 900; y += 92) graphics.lineBetween(0, y, 1600, y);
-
-  graphics.fillStyle(0x73bdd0, 1);
-  graphics.lineStyle(8, 0x405a59, 1);
-  graphics.fillRoundedRect(130, 85, 260, 210, 24);
-  graphics.strokeRoundedRect(130, 85, 260, 210, 24);
-  graphics.lineStyle(6, 0xffffff, 0.8);
-  graphics.lineBetween(260, 90, 260, 290);
-  graphics.lineBetween(135, 190, 385, 190);
-
-  graphics.fillStyle(0x73bdd0, 1);
-  graphics.lineStyle(8, 0x405a59, 1);
-  graphics.fillRoundedRect(1210, 85, 260, 210, 24);
-  graphics.strokeRoundedRect(1210, 85, 260, 210, 24);
-  graphics.lineStyle(6, 0xffffff, 0.8);
-  graphics.lineBetween(1340, 90, 1340, 290);
-  graphics.lineBetween(1215, 190, 1465, 190);
-
-  const counter = scene.add.rectangle(810, 390, 730, 150, 0x8fcf9f).setStrokeStyle(9, 0x405a59).setDepth(410);
-  const counterTop = scene.add.rectangle(810, 314, 775, 42, 0xffd886).setStrokeStyle(8, 0x405a59).setDepth(413);
-  const counterPanel = scene.add.rectangle(810, 390, 290, 86, 0xfff0c7).setStrokeStyle(6, 0x405a59).setDepth(415);
-  const counterText = scene.add.text(810, 390, "★  PIZZA  ★", {
-    fontFamily: "Arial Rounded MT Bold, sans-serif",
-    fontSize: "30px",
-    color: "#e46155"
-  }).setOrigin(0.5).setDepth(416);
-
-  const oven = scene.add.rectangle(1335, 410, 255, 280, 0xef765d).setStrokeStyle(9, 0x405a59).setDepth(420);
-  scene.add.rectangle(1335, 400, 155, 115, 0x4e5d5d).setStrokeStyle(8, 0x405a59).setDepth(422);
-  scene.add.ellipse(1335, 420, 108, 55, 0xffc962, 0.75).setDepth(423);
-  scene.add.circle(1282, 318, 10, 0xffe56e).setStrokeStyle(4, 0x405a59).setDepth(423);
-  scene.add.circle(1320, 318, 10, 0x7bd59a).setStrokeStyle(4, 0x405a59).setDepth(423);
-
-  const shelf = scene.add.rectangle(800, 95, 440, 105, 0xe8915d).setStrokeStyle(8, 0x405a59).setDepth(95);
-  [680, 760, 840, 920].forEach((x, index) => {
-    scene.add.circle(x, 95, 31, 0xffe298).setStrokeStyle(5, 0x405a59).setDepth(97);
-    scene.add.circle(x - 8, 90, 6, index % 2 ? 0x78b85f : 0xe76154).setDepth(98);
-    scene.add.circle(x + 10, 104, 6, 0xe76154).setDepth(98);
-  });
-
-  scene.exitDoor = { x: 800, y: 848 };
-  scene.add.rectangle(800, 845, 190, 105, 0x58a78b).setStrokeStyle(9, 0x405a59).setDepth(820);
-  scene.add.rectangle(800, 835, 132, 62, 0x9de1c6).setDepth(822);
-  scene.exitGlow = scene.add.ellipse(800, 837, 235, 74, 0xffe179, 0.2).setDepth(818);
-  scene.tweens.add({ targets: scene.exitGlow, scaleX: 1.13, scaleY: 1.13, alpha: 0.38, duration: 760, yoyo: true, repeat: -1 });
-
-  const chef = scene.add.container(800, 263).setDepth(430);
-  chef.add(scene.add.circle(0, 0, 50, 0xc99868).setStrokeStyle(7, 0x405a59));
-  chef.add(scene.add.circle(-18, -4, 5, 0x364f51));
-  chef.add(scene.add.circle(18, -4, 5, 0x364f51));
-  chef.add(scene.add.arc(0, 12, 17, 15, 165, false, 0, 0).setStrokeStyle(4, 0x364f51));
-  chef.add(scene.add.ellipse(0, -50, 105, 50, 0xffffff).setStrokeStyle(7, 0x405a59));
-  chef.add(scene.add.circle(-35, -68, 27, 0xffffff).setStrokeStyle(6, 0x405a59));
-  chef.add(scene.add.circle(0, -75, 32, 0xffffff).setStrokeStyle(6, 0x405a59));
-  chef.add(scene.add.circle(35, -68, 27, 0xffffff).setStrokeStyle(6, 0x405a59));
-  chef.add(scene.add.rectangle(0, 68, 100, 78, 0xffffff).setStrokeStyle(7, 0x405a59));
-  chef.add(scene.add.text(0, 66, "🍕", { fontSize: "40px" }).setOrigin(0.5));
-  scene.tweens.add({ targets: chef, y: 257, duration: 820, yoyo: true, repeat: -1, ease: "Sine.InOut" });
-
-  scene.add.ellipse(350, 650, 270, 120, 0xffd58a).setStrokeStyle(8, 0x405a59).setDepth(645);
-  scene.add.rectangle(350, 705, 25, 115, 0x9b6844).setDepth(640);
-  scene.add.ellipse(1250, 680, 270, 120, 0xffd58a).setStrokeStyle(8, 0x405a59).setDepth(675);
-  scene.add.rectangle(1250, 735, 25, 115, 0x9b6844).setDepth(670);
-
-  addSparkle(scene, 1085, 500, 0);
-  addSparkle(scene, 1140, 450, 280);
-  addSparkle(scene, 1220, 505, 560);
-
-  void counter;
-  void counterTop;
-  void counterPanel;
-  void counterText;
-  void oven;
-  void shelf;
-}
-
-class PizzaShopScene extends Phaser.Scene {
-  constructor() {
-    super("PizzaShopScene");
-  }
-
-  create() {
-    this.physics.world.setBounds(0, 0, 1600, 900);
-    drawShopInterior(this);
-    createPlayer(this, 800, 720);
-
-    this.keys = this.input.keyboard.addKeys({
-      up: Phaser.Input.Keyboard.KeyCodes.UP,
-      down: Phaser.Input.Keyboard.KeyCodes.DOWN,
-      left: Phaser.Input.Keyboard.KeyCodes.LEFT,
-      right: Phaser.Input.Keyboard.KeyCodes.RIGHT,
-      w: Phaser.Input.Keyboard.KeyCodes.W,
-      a: Phaser.Input.Keyboard.KeyCodes.A,
-      s: Phaser.Input.Keyboard.KeyCodes.S,
-      d: Phaser.Input.Keyboard.KeyCodes.D,
-      action: Phaser.Input.Keyboard.KeyCodes.SPACE
-    });
-
-    addPhysicsBarrier(this, 810, 345, 760, 185);
-    addPhysicsBarrier(this, 1335, 410, 280, 300);
-    addPhysicsBarrier(this, 350, 650, 280, 125);
-    addPhysicsBarrier(this, 1250, 680, 280, 125);
-
-    this.cameras.main.setBounds(0, 0, 1600, 900);
-    this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
-    this.cameras.main.fadeIn(350, 255, 244, 218);
-    setObjective("🍕", "👀", "피자가게를 둘러봐요");
-    setActionUi("✦", "행동", false);
-    this.transitioning = false;
-    showToast("피자가게!", 950);
-  }
-
-  leaveShop() {
-    if (this.transitioning) return;
-    this.transitioning = true;
-    playDoorSound();
-    this.player.setVelocity(0, 0);
-    this.cameras.main.fadeOut(320, 255, 244, 218);
-    this.time.delayedCall(330, () => this.scene.start("TownScene"));
-  }
-
-  hop() {
-    if (this.player.getData("hopping")) return;
-    this.player.setData("hopping", true);
-    playTone(360, 0.08, "triangle", 0.018, 0, 520);
-    this.tweens.add({
-      targets: this.player,
-      scaleX: 1.13,
-      scaleY: 0.94,
-      duration: 100,
-      yoyo: true,
-      onComplete: () => this.player.setData("hopping", false)
-    });
-  }
-
-  update(time) {
-    if (this.transitioning) return;
-    updatePlayer(this, time);
-    const nearExit = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.exitDoor.x, this.exitDoor.y) < 135;
-    setActionUi(nearExit ? "↩" : "✦", nearExit ? "나가기" : "행동", nearExit);
-    this.exitGlow.setAlpha(nearExit ? 0.5 : 0.2);
-
-    if (Phaser.Input.Keyboard.JustDown(this.keys.action)) controls.actionQueued = true;
-    if (controls.actionQueued) {
-      controls.actionQueued = false;
-      nearExit ? this.leaveShop() : this.hop();
-    }
-  }
-}
-
-ui.cards.forEach((card) => {
-  if (card.dataset.character === selectedCharacter) card.classList.add("is-selected");
-  card.addEventListener("click", () => launchGame(card.dataset.character));
+const heroTextures = new Map();
+["down", "up", "left", "right"].forEach((direction) => {
+  [0, 1].forEach((step) => heroTextures.set(`${direction}-${step}`, pixelTexture(direction, step)));
 });
 
+const hero = new THREE.Group();
+hero.position.copy(START_POSITION);
+world.add(hero);
+
+const heroShadow = new THREE.Mesh(
+  new THREE.CircleGeometry(0.55, 24),
+  new THREE.MeshBasicMaterial({ color: 0x22372f, transparent: true, opacity: 0.25, depthWrite: false })
+);
+heroShadow.rotation.x = -Math.PI / 2;
+heroShadow.scale.z = 0.55;
+heroShadow.position.y = 0.02;
+hero.add(heroShadow);
+
+const heroMaterial = new THREE.SpriteMaterial({
+  map: heroTextures.get("up-0"),
+  transparent: true,
+  alphaTest: 0.12,
+  depthTest: true,
+  depthWrite: false
+});
+const heroSprite = new THREE.Sprite(heroMaterial);
+heroSprite.center.set(0.5, 0.03);
+heroSprite.scale.set(1.85, 2.35, 1);
+heroSprite.position.y = 0.02;
+hero.add(heroSprite);
+
+function canOccupy(x, z) {
+  if (x < -13 || x > 13 || z < -9.3 || z > 9.3) return false;
+  return colliders.every((collider) => {
+    if (collider.type === "circle") {
+      return Math.hypot(x - collider.x, z - collider.z) > PLAYER_RADIUS + collider.radius;
+    }
+    const halfWidth = collider.width / 2 + PLAYER_RADIUS;
+    const halfDepth = collider.depth / 2 + PLAYER_RADIUS;
+    return !(Math.abs(x - collider.x) < halfWidth && Math.abs(z - collider.z) < halfDepth);
+  });
+}
+
+const projectedForward = new THREE.Vector3();
+const projectedRight = new THREE.Vector3();
+const moveVector = new THREE.Vector3();
+
+function readInput() {
+  let x = controls.x;
+  let y = controls.y;
+  if (controls.keys.has("ArrowLeft") || controls.keys.has("KeyA")) x -= 1;
+  if (controls.keys.has("ArrowRight") || controls.keys.has("KeyD")) x += 1;
+  if (controls.keys.has("ArrowUp") || controls.keys.has("KeyW")) y -= 1;
+  if (controls.keys.has("ArrowDown") || controls.keys.has("KeyS")) y += 1;
+  return { x, y };
+}
+
+function updateHero(delta, elapsed) {
+  const input = readInput();
+  const inputLength = Math.hypot(input.x, input.y);
+  const moving = started && inputLength > 0.12;
+
+  if (moving) {
+    camera.getWorldDirection(projectedForward);
+    projectedForward.y = 0;
+    projectedForward.normalize();
+    projectedRight.crossVectors(projectedForward, camera.up).normalize();
+    moveVector.copy(projectedRight).multiplyScalar(input.x);
+    moveVector.addScaledVector(projectedForward, -input.y);
+    moveVector.normalize();
+
+    const speed = 4.25;
+    const nextX = hero.position.x + moveVector.x * speed * delta;
+    const nextZ = hero.position.z + moveVector.z * speed * delta;
+    if (canOccupy(nextX, hero.position.z)) hero.position.x = nextX;
+    if (canOccupy(hero.position.x, nextZ)) hero.position.z = nextZ;
+
+    const screenX = input.x / inputLength;
+    const screenY = input.y / inputLength;
+    let direction;
+    if (Math.abs(screenX) > Math.abs(screenY) * 0.72) direction = screenX > 0 ? "right" : "left";
+    else direction = screenY > 0 ? "down" : "up";
+    const step = Math.floor(elapsed * 7) % 2;
+    heroMaterial.map = heroTextures.get(`${direction}-${step}`);
+    walkClock += delta;
+    heroSprite.position.y = 0.02 + Math.abs(Math.sin(walkClock * 14)) * 0.07;
+    heroSprite.material.rotation = Math.sin(walkClock * 7) * 0.025;
+  } else {
+    walkClock = 0;
+    heroSprite.position.y += (0.02 - heroSprite.position.y) * Math.min(1, delta * 10);
+    heroSprite.material.rotation *= Math.max(0, 1 - delta * 10);
+  }
+
+  nearDoor = hero.position.distanceTo(DOOR_POSITION) < 2.55;
+  setAction(nearDoor ? (doorOpen ? "문 닫기" : "문 열기") : "인사하기", nearDoor);
+  ui.objectiveText.textContent = doorOpen ? "따뜻한 피자 향기가 나요" : nearDoor ? "오른쪽 버튼으로 문을 열어요" : "피자가게 문까지 걸어가요";
+}
+
+function doAction() {
+  if (!started) return;
+  if (nearDoor) {
+    doorOpen = !doorOpen;
+    doorTargetRotation = doorOpen ? -1.25 : 0;
+    playDoorSound();
+    showToast(doorOpen ? "피자 향기가 솔솔!" : "문을 살며시 닫았어요");
+    return;
+  }
+
+  playTone(520, 0.1, 0, 0.022);
+  playTone(660, 0.12, 0.08, 0.02);
+  heroSprite.scale.set(2.0, 2.18, 1);
+  showToast("안녕! 나는 보리야");
+}
+
+function updateWorld(delta, elapsed) {
+  shop.doorPivot.rotation.y += (doorTargetRotation - shop.doorPivot.rotation.y) * Math.min(1, delta * 6);
+  shop.light.intensity += ((doorOpen ? 2.8 : 1.35) - shop.light.intensity) * Math.min(1, delta * 4);
+  doorMarker.visible = !doorOpen;
+  if (doorMarker.visible) {
+    const pulse = 1 + Math.sin(elapsed * 3.2) * 0.11;
+    doorMarker.scale.setScalar(pulse);
+  }
+  heroSprite.scale.x += (1.85 - heroSprite.scale.x) * Math.min(1, delta * 8);
+  heroSprite.scale.y += (2.35 - heroSprite.scale.y) * Math.min(1, delta * 8);
+}
+
+function updateCamera(delta) {
+  const desired = new THREE.Vector3(hero.position.x * 0.72 + 0.7, 0.8, hero.position.z * 0.62 - 0.45);
+  cameraFocus.lerp(desired, Math.min(1, delta * 3.2));
+  camera.position.copy(cameraFocus).add(cameraOffset);
+  camera.lookAt(cameraFocus);
+}
+
+function resize() {
+  const width = ui.gameRoot.clientWidth || window.innerWidth;
+  const height = ui.gameRoot.clientHeight || window.innerHeight;
+  const aspect = width / Math.max(1, height);
+  camera.left = (-VIEW_HEIGHT * aspect) / 2;
+  camera.right = (VIEW_HEIGHT * aspect) / 2;
+  camera.top = VIEW_HEIGHT / 2;
+  camera.bottom = -VIEW_HEIGHT / 2;
+  camera.updateProjectionMatrix();
+  renderer.setSize(width, height, false);
+}
+
+function resetGame() {
+  hero.position.copy(START_POSITION);
+  doorOpen = false;
+  doorTargetRotation = 0;
+  controls.x = 0;
+  controls.y = 0;
+  controls.actionQueued = false;
+  controls.activePointer = null;
+  ui.joystickStick.style.transform = "translate(0, 0)";
+  cameraFocus.set(0.7, 0.8, 1.2);
+  setAction("인사하기", false);
+  ui.objectiveText.textContent = "피자가게 문까지 걸어가요";
+}
+
+function startGame() {
+  started = true;
+  ui.startScreen.classList.add("is-hidden");
+  playStartSound();
+  showToast("보리와 함께 출발!");
+}
+
+function returnHome() {
+  started = false;
+  resetGame();
+  ui.startScreen.classList.remove("is-hidden");
+}
+
+function animate(now) {
+  const delta = Math.min(0.04, Math.max(0.001, (now - lastTime) / 1000));
+  const elapsed = now / 1000;
+  lastTime = now;
+  updateHero(delta, elapsed);
+  updateWorld(delta, elapsed);
+  updateCamera(delta);
+  renderer.render(scene, camera);
+  window.requestAnimationFrame(animate);
+}
+
+ui.startButton.addEventListener("click", startGame);
+ui.homeButton.addEventListener("click", returnHome);
 ui.actionButton.addEventListener("pointerdown", (event) => {
   event.preventDefault();
   controls.actionQueued = true;
-  controls.lastInputAt = performance.now();
   ensureAudio();
 });
-
-ui.soundButton.setAttribute("aria-pressed", String(soundMuted));
-ui.soundButton.setAttribute("aria-label", soundMuted ? "소리 켜기" : "소리 끄기");
+ui.soundButton.setAttribute("aria-pressed", String(muted));
+ui.soundButton.setAttribute("aria-label", muted ? "소리 켜기" : "소리 끄기");
 ui.soundButton.addEventListener("click", () => {
-  soundMuted = !soundMuted;
-  localStorage.setItem(`${STORAGE_PREFIX}muted`, String(soundMuted));
-  ui.soundButton.setAttribute("aria-pressed", String(soundMuted));
-  ui.soundButton.setAttribute("aria-label", soundMuted ? "소리 켜기" : "소리 끄기");
-  if (!soundMuted) playSelectSound();
+  muted = !muted;
+  localStorage.setItem(`${STORAGE_PREFIX}muted`, String(muted));
+  ui.soundButton.setAttribute("aria-pressed", String(muted));
+  ui.soundButton.setAttribute("aria-label", muted ? "소리 켜기" : "소리 끄기");
+  if (!muted) playTone(523, 0.12);
 });
 
-ui.homeButton.addEventListener("click", returnToSelection);
-setupJoystick();
-
+window.addEventListener("keydown", (event) => {
+  controls.keys.add(event.code);
+  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(event.code)) event.preventDefault();
+  if (event.code === "Space" && !event.repeat) controls.actionQueued = true;
+});
+window.addEventListener("keyup", (event) => controls.keys.delete(event.code));
+window.addEventListener("resize", resize);
 document.addEventListener("contextmenu", (event) => event.preventDefault());
 document.addEventListener("gesturestart", (event) => event.preventDefault());
+
+setupJoystick();
+resize();
+resetGame();
+window.requestAnimationFrame(animate);
+
+window.setInterval(() => {
+  if (controls.actionQueued) {
+    controls.actionQueued = false;
+    doAction();
+  }
+}, 40);
 
 if (import.meta.env.PROD && "serviceWorker" in navigator && window.isSecureContext) {
   window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {}));

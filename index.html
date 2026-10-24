@@ -3,79 +3,65 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-    <meta name="theme-color" content="#76cfc1" />
+    <meta name="theme-color" content="#173f42" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="별빛마을" />
-    <meta name="description" content="아이패드로 탐험하는 포근한 마을 모험 게임" />
+    <meta name="apple-mobile-web-app-title" content="피자마을" />
+    <meta name="description" content="2D 캐릭터와 3D 마을이 만나는 아이패드용 산책 게임" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
-    <link rel="apple-touch-icon" href="./icon.svg" />
-    <title>별빛마을 모험대</title>
+    <title>피자마을 산책</title>
   </head>
   <body>
-    <main id="app" aria-label="별빛마을 모험대">
-      <section id="character-select" class="character-select" aria-labelledby="select-title">
-        <div class="select-cloud select-cloud--one" aria-hidden="true"></div>
-        <div class="select-cloud select-cloud--two" aria-hidden="true"></div>
-        <div class="select-panel">
-          <div class="brand-mark" aria-hidden="true"><span>★</span></div>
-          <h1 id="select-title">별빛마을 모험대</h1>
-          <p class="select-prompt"><span aria-hidden="true">☝</span> 함께 갈 친구를 골라요</p>
-          <div class="character-list" role="list">
-            <button class="character-card character-card--sun" type="button" data-character="sun" aria-label="노란색 보리와 시작하기">
-              <span class="character-preview" aria-hidden="true"><i class="ear ear--left"></i><i class="ear ear--right"></i><i class="face"><b></b><b></b><em></em></i><i class="body"></i><i class="scarf"></i></span>
-              <strong>보리</strong>
-              <span class="pick-mark" aria-hidden="true">▶</span>
-            </button>
-            <button class="character-card character-card--mint" type="button" data-character="mint" aria-label="초록색 모모와 시작하기">
-              <span class="character-preview" aria-hidden="true"><i class="ear ear--left"></i><i class="ear ear--right"></i><i class="face"><b></b><b></b><em></em></i><i class="body"></i><i class="scarf"></i></span>
-              <strong>모모</strong>
-              <span class="pick-mark" aria-hidden="true">▶</span>
-            </button>
-            <button class="character-card character-card--berry" type="button" data-character="berry" aria-label="분홍색 두두와 시작하기">
-              <span class="character-preview" aria-hidden="true"><i class="ear ear--left"></i><i class="ear ear--right"></i><i class="face"><b></b><b></b><em></em></i><i class="body"></i><i class="scarf"></i></span>
-              <strong>두두</strong>
-              <span class="pick-mark" aria-hidden="true">▶</span>
-            </button>
-          </div>
-        </div>
-      </section>
+    <main id="app" aria-label="피자마을 산책">
+      <section id="game-screen" class="game-screen" aria-label="게임 화면">
+        <div id="game-root" aria-hidden="true"></div>
+        <div class="vignette" aria-hidden="true"></div>
 
-      <section id="game-screen" class="game-screen is-hidden" aria-label="게임 화면">
-        <div id="game-root"></div>
-
-        <div class="hud safe-top" aria-live="polite">
-          <button id="home-button" class="round-button home-button" type="button" aria-label="친구 다시 고르기">
-            <span aria-hidden="true">⌂</span>
+        <header class="hud safe-top">
+          <button id="home-button" class="icon-button" type="button" aria-label="처음 화면으로">
+            <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 15.2 16 6l11 9.2v11.3h-7v-7h-8v7H5Z"/></svg>
           </button>
           <div id="objective" class="objective">
-            <span id="objective-start" class="objective-icon" aria-hidden="true">🐾</span>
-            <span class="objective-arrow" aria-hidden="true">➜</span>
-            <span id="objective-end" class="objective-icon" aria-hidden="true">🍕</span>
-            <strong id="objective-text">피자가게로 가요</strong>
+            <span class="objective-dot" aria-hidden="true"></span>
+            <strong id="objective-text">피자가게 문까지 걸어가요</strong>
           </div>
-          <button id="sound-button" class="round-button sound-button" type="button" aria-label="소리 끄기" aria-pressed="false">
-            <span class="sound-on" aria-hidden="true">♪</span>
-            <span class="sound-off" aria-hidden="true">×</span>
+          <button id="sound-button" class="icon-button" type="button" aria-label="소리 끄기" aria-pressed="false">
+            <svg class="sound-on" viewBox="0 0 32 32" aria-hidden="true"><path d="M6 13h6l7-6v18l-7-6H6Zm17-1.5c2 2.4 2 6.6 0 9M26 8c4.6 4.6 4.6 11.4 0 16"/></svg>
+            <svg class="sound-off" viewBox="0 0 32 32" aria-hidden="true"><path d="M6 13h6l7-6v18l-7-6H6Zm17-1 7 8m0-8-7 8"/></svg>
           </button>
-        </div>
+        </header>
 
         <div id="joystick-zone" class="joystick-zone safe-bottom" aria-label="이동 조이스틱">
           <div class="joystick-base"><div id="joystick-stick" class="joystick-stick"></div></div>
-          <span class="joystick-hint" aria-hidden="true">이동</span>
         </div>
 
-        <button id="action-button" class="action-button safe-bottom" type="button" aria-label="행동하기">
-          <span id="action-icon" aria-hidden="true">✦</span>
-          <small id="action-label">행동</small>
+        <button id="action-button" class="action-button safe-bottom" type="button" aria-label="살펴보기">
+          <svg viewBox="0 0 52 52" aria-hidden="true"><path d="M20 28V13c0-4 6-4 6 0v10-13c0-4 6-4 6 0v13-10c0-4 6-4 6 0v13-8c0-4 6-4 6 0v12c0 11-7 18-17 18h-3c-7 0-11-4-14-10l-4-8c-2-4 3-7 6-3l8 11Z"/></svg>
+          <small id="action-label">살펴보기</small>
         </button>
 
         <div id="scene-toast" class="scene-toast" aria-live="polite"></div>
       </section>
 
+      <section id="start-screen" class="start-screen" aria-labelledby="start-title">
+        <div class="start-card">
+          <p class="start-kicker">BORI'S LITTLE DAY</p>
+          <h1 id="start-title">피자마을<br />산책</h1>
+          <p>보리와 함께 피자가게 문을 열어봐요.</p>
+          <button id="start-button" class="start-button" type="button">
+            <span>마을로 들어가기</span>
+            <svg viewBox="0 0 34 24" aria-hidden="true"><path d="m20 3 10 9-10 9M4 12h25"/></svg>
+          </button>
+          <div class="start-help">
+            <span><i class="mini-stick" aria-hidden="true"></i> 왼쪽으로 걷기</span>
+            <span><i class="mini-button" aria-hidden="true"></i> 오른쪽으로 행동</span>
+          </div>
+        </div>
+      </section>
+
       <section class="rotate-screen" aria-label="아이패드를 가로로 돌려주세요">
-        <div class="rotate-tablet" aria-hidden="true"><span>★</span></div>
+        <div class="rotate-tablet" aria-hidden="true"><span></span></div>
         <strong>아이패드를 가로로 돌려주세요</strong>
       </section>
     </main>
